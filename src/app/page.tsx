@@ -17,6 +17,9 @@ export default function Home() {
   const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [brief, setBrief] = useState('');
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [personalNote, setPersonalNote] = useState('');
 
   useEffect(() => {
     fetchTrades();
@@ -41,57 +44,50 @@ export default function Home() {
   }
 
   async function addTrade() {
-    if (!ticker || !date) {
-      setMessage('Please fill in ticker and date.');
-      return;
-    }
+    if (!ticker || !date) { setMessage('Please fill in ticker and date.'); return; }
     setLoading(true);
-    const isWin = result === 'Win';
     const isLoss = result === 'Loss';
+    const isWin = result === 'Win';
     const isOpen = result === 'Open';
-    const newActiveTrades = isOpen
-      ? (systemState?.active_trades || 0) + 1
-      : systemState?.active_trades || 0;
-    const newConsecutiveLosses = isLoss
-      ? (systemState?.consecutive_losses || 0) + 1
-      : isWin ? 0 : systemState?.consecutive_losses || 0;
+    const newActiveTrades = isOpen ? (systemState?.active_trades || 0) + 1 : systemState?.active_trades || 0;
+    const newConsecutiveLosses = isLoss ? (systemState?.consecutive_losses || 0) + 1 : isWin ? 0 : systemState?.consecutive_losses || 0;
     const cooldownUntil = newConsecutiveLosses >= 2
       ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       : systemState?.cooldown_until || null;
-
-    const { error } = await supabase.from('trades').insert([{
-      ticker: ticker.toUpperCase(),
-      setup_type: setupType,
-      result,
-      notes,
-      date,
-    }]);
-
+    const { error } = await supabase.from('trades').insert([{ ticker: ticker.toUpperCase(), setup_type: setupType, result, notes, date }]);
     if (!error) {
-      await supabase.from('system_state').update({
-        active_trades: newActiveTrades,
-        consecutive_losses: newConsecutiveLosses,
-        cooldown_until: cooldownUntil,
-      }).eq('id', 1);
+      await supabase.from('system_state').update({ active_trades: newActiveTrades, consecutive_losses: newConsecutiveLosses, cooldown_until: cooldownUntil }).eq('id', 1);
       setMessage('Trade saved!');
-      setTicker('');
-      setNotes('');
-      setDate('');
-      fetchTrades();
-      fetchSystemState();
-    } else {
-      setMessage('Error saving trade.');
-    }
+      setTicker(''); setNotes(''); setDate('');
+      fetchTrades(); fetchSystemState();
+    } else { setMessage('Error saving trade.'); }
     setLoading(false);
   }
 
-  const isOnCooldown = systemState?.cooldown_until
-    && new Date(systemState.cooldown_until) > new Date();
+  async function generateBrief() {
+    setBriefLoading(true);
+    setBrief('');
+    try {
+      const rssRes = await fetch('/api/rss');
+      const rssData = await rssRes.json();
+      const res = await fetch('/api/generate-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headlines: rssData.headlines, personalNote }),
+      });
+      const data = await res.json();
+      setBrief(data.brief);
+    } catch {
+      setBrief('Error generating brief. Please try again.');
+    }
+    setBriefLoading(false);
+  }
+
+  const isOnCooldown = systemState?.cooldown_until && new Date(systemState.cooldown_until) > new Date();
   const canTrade = !isOnCooldown && (systemState?.active_trades || 0) < 3;
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto', padding: '40px 20px', fontFamily: 'sans-serif' }}>
-
       <h1 style={{ fontSize: 26, fontWeight: 'bold', marginBottom: 4 }}>Trading Brief — Admin</h1>
       <p style={{ color: '#888', marginBottom: 32, fontSize: 14 }}>Your daily trading command centre.</p>
 
@@ -111,6 +107,24 @@ export default function Home() {
             {isOnCooldown ? `Cooldown until ${systemState.cooldown_until}` : canTrade ? 'Ready to Trade' : 'Max Trades Reached'}
           </p>
         </div>
+      </div>
+
+      {/* Generate Brief */}
+      <div style={{ background: '#000', borderRadius: 8, padding: 24, marginBottom: 32 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, color: '#fff' }}>Morning Brief</h2>
+        <p style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>Add a personal note then generate your daily brief.</p>
+        <textarea value={personalNote} onChange={e => setPersonalNote(e.target.value)}
+          placeholder="Any personal observations for today... (optional)"
+          style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid #333', background: '#111', color: '#fff', fontSize: 13, height: 70, boxSizing: 'border-box', marginBottom: 12 }} />
+        <button onClick={generateBrief} disabled={briefLoading}
+          style={{ background: '#fff', color: '#000', padding: '12px 28px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 }}>
+          {briefLoading ? 'Generating...' : 'Generate Morning Brief'}
+        </button>
+        {brief && (
+          <div style={{ marginTop: 24, background: '#111', borderRadius: 6, padding: 20, color: '#e2e2e2', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
+            {brief}
+          </div>
+        )}
       </div>
 
       {/* Add Trade Form */}
