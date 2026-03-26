@@ -1,11 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
 import { NextResponse } from 'next/server';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
-
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+const resend = new Resend(process.env.RESEND_API_KEY!);
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -15,16 +14,11 @@ export async function POST(request: Request) {
   const { headlines, personalNote } = await request.json();
 
   const { data: systemState } = await supabase
-    .from('system_state')
-    .select('*')
-    .eq('id', 1)
-    .single();
+    .from('system_state').select('*').eq('id', 1).single();
 
   const { data: recentTrades } = await supabase
-    .from('trades')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(5);
+    .from('trades').select('*')
+    .order('created_at', { ascending: false }).limit(5);
 
   const isOnCooldown = systemState?.cooldown_until &&
     new Date(systemState.cooldown_until) > new Date();
@@ -133,8 +127,7 @@ ${personalNote || 'No personal note today'}`;
   });
 
   const briefContent = message.content[0].type === 'text'
-    ? message.content[0].text
-    : '';
+    ? message.content[0].text : '';
 
   await supabase.from('daily_reports').insert([{
     date: new Date().toISOString().split('T')[0],
@@ -143,5 +136,46 @@ ${personalNote || 'No personal note today'}`;
     personal_note: personalNote || '',
   }]);
 
+  try {
+    await resend.emails.send({
+      from: 'Trading Brief <onboarding@resend.dev>',
+      to: process.env.EMAIL_TO!,
+      subject: `Morning Brief - ${new Date().toDateString()} - ${decision}`,
+      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
+          Morning Brief — ${new Date().toDateString()}
+        </h1>
+        <div style="background: #f9f9f9; padding: 16px; border-radius: 6px; margin: 16px 0;">
+          <p style="font-size: 18px; font-weight: bold; color: ${decision === 'TRADE' ? '#38a169' : '#e53e3e'};">
+            DECISION: ${decision}
+          </p>
+        </div>
+        <pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">
+${briefContent}
+        </pre>
+        <p style="color: #888; font-size: 12px; margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px;">
+          This brief is for educational purposes only. Not financial advice.
+        </p>
+      </div>`,
+    });
+  } catch (emailError) {
+    console.error('Email send failed:', emailError);
+  }
+
   return NextResponse.json({ brief: briefContent, decision });
 }
+```
+
+Save with **Ctrl + S**.
+
+Now there's one important thing about Resend on a free account — emails can only be sent to verified addresses OR from `onboarding@resend.dev` as the sender. Since you haven't verified a domain yet, we're using their default sender which works fine for testing.
+
+Restart your app:
+```
+taskkill /F /IM node.exe
+```
+```
+cd "C:\Users\Philip Ho\trading-brief"
+```
+```
+npm run dev
