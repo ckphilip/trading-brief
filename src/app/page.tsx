@@ -7,22 +7,15 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-function getWeekLabel(dateStr: string): string {
-  const date = new Date(dateStr);
-  const start = new Date(date);
-  start.setDate(date.getDate() - date.getDay());
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  return start.toDateString() + ' - ' + end.toDateString();
-}
-
 export default function Home() {
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
   const [personalNote, setPersonalNote] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+  const [openYears, setOpenYears] = useState<Set<string>>(new Set());
+  const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
+  const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set());
 
   useEffect(() => { fetchHistory(); }, []);
 
@@ -31,7 +24,7 @@ export default function Home() {
       .from('daily_reports')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(60);
+      .limit(200);
     if (data) setHistory(data);
   }
 
@@ -55,20 +48,33 @@ export default function Home() {
     setBriefLoading(false);
   }
 
-  const grouped = history.reduce((acc: Record<string, any[]>, report) => {
-    const week = getWeekLabel(report.created_at);
-    if (!acc[week]) acc[week] = [];
-    acc[week].push(report);
-    return acc;
-  }, {});
+  const grouped: Record<string, Record<string, Record<string, any[]>>> = {};
+  history.forEach(report => {
+    const d = new Date(report.created_at);
+    const year = d.getFullYear().toString();
+    const month = d.toLocaleString('default', { month: 'long' });
+    const weekStart = new Date(d);
+    weekStart.setDate(d.getDate() - d.getDay());
+    const week = 'Week of ' + weekStart.toDateString();
+    if (!grouped[year]) grouped[year] = {};
+    if (!grouped[year][month]) grouped[year][month] = {};
+    if (!grouped[year][month][week]) grouped[year][month][week] = [];
+    grouped[year][month][week].push(report);
+  });
 
-  function toggleWeek(week: string) {
-    setExpandedWeeks(prev => {
-      const next = new Set(prev);
-      next.has(week) ? next.delete(week) : next.add(week);
-      return next;
-    });
-  }
+  const toggle = (set: Set<string>, key: string, setter: Function) => {
+    const next = new Set(set);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setter(next);
+  };
+
+  const rowStyle = (depth: number) => ({
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '12px ' + (16 + depth * 12) + 'px',
+    cursor: 'pointer',
+    background: depth === 0 ? '#f0f0f0' : depth === 1 ? '#f9f9f9' : '#fff',
+    borderTop: '1px solid #eee'
+  });
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto', padding: '40px 20px', fontFamily: 'sans-serif' }}>
@@ -94,40 +100,51 @@ export default function Home() {
 
       <h2 style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Brief History</h2>
       {Object.keys(grouped).length === 0 ? (
-        <p style={{ color: '#888', fontSize: 14 }}>No briefs generated yet.</p>
+        <p style={{ color: '#888', fontSize: 14 }}>No briefs yet.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {Object.entries(grouped).map(([week, reports]) => (
-            <div key={week} style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
-              <div onClick={() => toggleWeek(week)}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', background: '#f9f9f9' }}>
-                <span style={{ fontWeight: 'bold', fontSize: 14 }}>Week of {week}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 12, color: '#888' }}>{reports.length} brief{reports.length > 1 ? 's' : ''}</span>
-                  <span style={{ fontSize: 18, color: '#888' }}>{expandedWeeks.has(week) ? '−' : '+'}</span>
-                </div>
+        <div style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+          {Object.entries(grouped).map(([year, months]) => (
+            <div key={year}>
+              <div onClick={() => toggle(openYears, year, setOpenYears)} style={rowStyle(0)}>
+                <span style={{ fontWeight: 'bold', fontSize: 15 }}>{year}</span>
+                <span style={{ color: '#888' }}>{openYears.has(year) ? '−' : '+'}</span>
               </div>
-              {expandedWeeks.has(week) && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                  {reports.map(report => (
-                    <div key={report.id} style={{ borderTop: '1px solid #eee' }}>
-                      <div onClick={() => setExpanded(expanded === report.id ? null : report.id)}
-                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', background: '#fff' }}>
+              {openYears.has(year) && Object.entries(months).map(([month, weeks]) => (
+                <div key={month}>
+                  <div onClick={() => toggle(openMonths, year+month, setOpenMonths)} style={rowStyle(1)}>
+                    <span style={{ fontWeight: 'bold', fontSize: 14 }}>{month}</span>
+                    <span style={{ color: '#aaa' }}>{openMonths.has(year+month) ? '−' : '+'}</span>
+                  </div>
+                  {openMonths.has(year+month) && Object.entries(weeks).map(([week, reports]) => (
+                    <div key={week}>
+                      <div onClick={() => toggle(openWeeks, year+month+week, setOpenWeeks)} style={rowStyle(2)}>
                         <div>
-                          <span style={{ fontSize: 13, fontWeight: 'bold' }}>{new Date(report.created_at).toDateString()}</span>
-                          <span style={{ marginLeft: 10, fontSize: 12, color: '#aaa' }}>{new Date(report.created_at).toLocaleTimeString()}</span>
+                          <span style={{ fontSize: 13, fontWeight: 'bold' }}>{week}</span>
+                          <span style={{ marginLeft: 8, fontSize: 11, color: '#aaa' }}>{reports.length} brief{reports.length > 1 ? 's' : ''}</span>
                         </div>
-                        <span style={{ fontSize: 16, color: '#aaa' }}>{expanded === report.id ? '−' : '+'}</span>
+                        <span style={{ color: '#bbb' }}>{openWeeks.has(year+month+week) ? '−' : '+'}</span>
                       </div>
-                      {expanded === report.id && (
-                        <div style={{ padding: '16px', borderTop: '1px solid #f0f0f0', background: '#fafafa', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: '#333' }}>
-                          {report.full_report}
+                      {openWeeks.has(year+month+week) && reports.map(report => (
+                        <div key={report.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                          <div onClick={() => setExpanded(expanded === report.id ? null : report.id)}
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 52px', cursor: 'pointer', background: '#fff' }}>
+                            <div>
+                              <span style={{ fontSize: 13 }}>{new Date(report.created_at).toDateString()}</span>
+                              <span style={{ marginLeft: 8, fontSize: 11, color: '#aaa' }}>{new Date(report.created_at).toLocaleTimeString()}</span>
+                            </div>
+                            <span style={{ fontSize: 14, color: '#bbb' }}>{expanded === report.id ? '−' : '+'}</span>
+                          </div>
+                          {expanded === report.id && (
+                            <div style={{ padding: '16px 52px', borderTop: '1px solid #f5f5f5', background: '#fafafa', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: '#333' }}>
+                              {report.full_report}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   ))}
                 </div>
-              )}
+              ))}
             </div>
           ))}
         </div>
