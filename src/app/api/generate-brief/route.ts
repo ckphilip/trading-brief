@@ -11,7 +11,9 @@ const supabase = createClient(
 );
 
 export async function POST(request: Request) {
-  const { headlines, personalNote } = await request.json();
+  const { headlines, personalNote, source } = await request.json();
+
+  const sourceLabel = source === 'firecrawl' ? 'Firecrawl (live web scrape)' : 'RSS feeds (fallback)';
 
   const prompt = `You are Philip's personal trading coach and morning brief generator. You think like a seasoned options income trader with decades of experience. You are strict, disciplined, and never sugarcoat reality.
 
@@ -60,17 +62,20 @@ Hard Avoidance:
 - No new positions during FOMC week
 - Never force a trade
 
-TODAY'S MARKET HEADLINES:
+DATA SOURCE: ${sourceLabel}
+
+TODAY'S MARKET HEADLINES (tagged by region and source):
 ${headlines?.join('\n') || 'No headlines available'}
 
-Generate Philip's morning trading brief. Be direct, strict, coach-like. No fluff.
+Generate Philip's morning trading brief. Be direct, strict, coach-like. No fluff. Reference specific headlines and their regions when making trade suggestions.
 
 Format exactly like this:
 
 MORNING BRIEF - ${new Date().toDateString()}
+Data source: ${sourceLabel}
 
 MARKET CONTEXT
-[3 to 4 bullet points from headlines most relevant to options income trading. Include which region each headline is from.]
+[3 to 5 bullet points covering US, Europe and Asia. Include source name for each point.]
 
 TRADE IDEAS
 [Suggest 2 to 3 high probability income setups based on market context and Philip's constitution. For each include: Ticker, Strategy, Why now, Entry criteria, DTE, Delta target, Risk note.]
@@ -101,12 +106,12 @@ ${personalNote || 'No personal note today'}`;
     await resend.emails.send({
       from: 'Trading Brief <brief@ngohiang.com>',
       to: process.env.EMAIL_TO!,
-      subject: `Morning Brief - ${new Date().toDateString()}`,
-      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;"><h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">Morning Brief - ${new Date().toDateString()}</h1><pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">${briefContent}</pre><p style="color: #888; font-size: 12px; margin-top: 24px;">Educational purposes only. Not financial advice.</p></div>`,
+      subject: `Morning Brief - ${new Date().toDateString()} - ${sourceLabel}`,
+      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;"><h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">Morning Brief - ${new Date().toDateString()}</h1><p style="font-size: 12px; color: #888;">Data source: ${sourceLabel}</p><pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">${briefContent}</pre><p style="color: #888; font-size: 12px; margin-top: 24px;">Educational purposes only. Not financial advice.</p></div>`,
     });
   } catch (emailError) {
     console.error('Email failed:', emailError);
   }
 
-  return NextResponse.json({ brief: briefContent });
+  return NextResponse.json({ brief: briefContent, source: sourceLabel });
 }
