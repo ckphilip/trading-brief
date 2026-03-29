@@ -1,95 +1,118 @@
 const fs = require('fs');
 
-fs.writeFileSync('src/app/daily/page.tsx', `
+fs.writeFileSync('src/app/api/generate-brief/route.ts', `
+import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
+import { NextResponse } from 'next/server';
 
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+const resend = new Resend(process.env.RESEND_API_KEY!);
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default async function DailyPage() {
-  const { data: report } = await supabase
-    .from('daily_reports')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+export async function POST(request: Request) {
+  const { headlines, personalNote, source } = await request.json();
+  const sourceLabel = source === 'firecrawl' ? 'Firecrawl (live web scrape)' : 'RSS feeds (global)';
 
-  function extractSection(brief: string, section: string): string {
-    if (!brief) return '';
-    const lines = brief.split('\\n');
-    const start = lines.findIndex(l => l.includes(section));
-    if (start === -1) return '';
-    const content = [];
-    for (let i = start + 1; i < lines.length; i++) {
-      if (lines[i].match(/^(TRADE IDEAS|RATIONALE|PERSONAL NOTE|DECISION|MARKET CONTEXT|MORNING BRIEF)/)) break;
-      if (lines[i].trim()) content.push(lines[i].trim());
-    }
-    return content.join(' ');
+  const prompt = \`You are Philip's personal trading coach and morning brief generator. You think like a seasoned options income trader with decades of experience. You are strict, disciplined, and never sugarcoat reality.
+
+PHILIP'S TRADING CONSTITUTION
+
+Philosophy:
+- Objective is to MINIMISE LOSS, not maximise profit
+- Whenever possible: LONG stocks, SHORT options
+- Holding cash is better than losing cash
+- When trade turns sour, exit cleanly
+- When satisfied with profit, sell. Do not chase greed
+- Wait for the fish to fall into the net. Never chase
+- Never violate a hard rule and celebrate it
+
+Money Management:
+- Max risk per trade: 4% of total equity
+- Max trade size: 10% of total equity
+- Max monthly loss: 12% of total equity
+- Max active trades: 3
+- Max working capital: 30% of total equity
+- Cash reserve: minimum 70%, sacred
+- 2 consecutive losses = 2 week mandatory cooldown
+
+Entry Rules:
+- IV Rank above 30% to sell premium
+- IV level below 60%
+- Open Interest above 500
+- Delta for CSP/CC: 0.30 to 0.40
+- Delta for IC short strikes: 0.20 to 0.30
+- DTE: 30 to 45 days entry, close or roll at 21 DTE
+- Minimum ROI per day: 0.5%
+- Only liquid underlyings: SPY, QQQ, IWM, DIA, SPX and large cap stocks
+
+Profit Taking:
+- 50% profit rule: close at 50% of max profit if in under 50% of trade duration
+- 200% loss rule: close if short option reaches 200% of premium collected
+
+Roll Rules:
+- Roll only for net credit
+- Never roll same position more than twice
+- Roll at 21 DTE not at expiration
+
+Hard Avoidance:
+- Never hold short option through earnings, close 5 days before
+- No new IC when VIX above 30
+- No new positions during FOMC week
+- Never force a trade
+
+DATA SOURCE: \${sourceLabel}
+
+TODAY'S MARKET HEADLINES (tagged by region):
+\${headlines?.join('\\n') || 'No headlines available'}
+
+Generate Philip's morning trading brief. Be direct, strict, coach-like. No fluff. Reference specific headlines and regions.
+
+Format exactly like this:
+
+MORNING BRIEF - \${new Date().toDateString()}
+Data source: \${sourceLabel}
+
+MARKET CONTEXT
+[3 to 5 bullet points covering US, Europe and Asia. Include source region for each point.]
+
+TRADE IDEAS
+[Suggest 2 to 3 high probability income setups. For each: Ticker, Strategy, Why now, Entry criteria, DTE, Delta target, Risk note.]
+
+RATIONALE
+[2 to 3 sentences. Coach style. Remind Philip of the most relevant rule for today.]
+\`;
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const briefContent = message.content[0].type === 'text' ? message.content[0].text : '';
+
+  const { data: inserted } = await supabase.from('daily_reports').insert([{
+    date: new Date().toISOString().split('T')[0],
+    full_report: briefContent,
+    decision: 'TRADE',
+    personal_note: '',
+  }]).select().single();
+
+  try {
+    await resend.emails.send({
+      from: 'Trading Brief <brief@ngohiang.com>',
+      to: process.env.EMAIL_TO!,
+      subject: \`Morning Brief - \${new Date().toDateString()}\`,
+      html: \`<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;"><h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">Morning Brief - \${new Date().toDateString()}</h1><pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">\${briefContent}</pre><p style="color: #888; font-size: 12px; margin-top: 24px;">Educational purposes only. Not financial advice.</p></div>\`,
+    });
+  } catch (emailError) {
+    console.error('Email failed:', emailError);
   }
 
-  const marketContext = report ? extractSection(report.full_report, 'MARKET CONTEXT') : '';
-  const personalNote = report?.personal_note || '';
-  const date = report ? new Date(report.created_at).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '';
-
-  return (
-    <div style={{ minHeight: '100vh', background: '#F2F2F7', fontFamily: 'Inter, -apple-system, sans-serif', WebkitFontSmoothing: 'antialiased' } as any}>
-
-      <div style={{ background: 'rgba(242,242,247,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(60,60,67,0.12)', padding: '12px 20px', position: 'sticky', top: 0, zIndex: 100 } as any}>
-        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 17, fontWeight: 700, color: '#000', letterSpacing: -0.4 }}>Daily Commentary</span>
-          <span style={{ fontSize: 13, color: '#6E6E73' }}>ngohiang.com</span>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 600, margin: '0 auto', padding: '24px 16px 48px' }}>
-
-        {!report ? (
-          <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 24, textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-            <div style={{ fontSize: 15, color: '#6E6E73' }}>No commentary available today. Check back later.</div>
-          </div>
-        ) : (
-          <>
-            <div style={{ fontSize: 13, color: '#6E6E73', marginBottom: 16, paddingLeft: 4 }}>{date}</div>
-
-            {marketContext && (
-              <div style={{ background: '#FFFFFF', borderRadius: 20, overflow: 'hidden', marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(60,60,67,0.08)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6E6E73', textTransform: 'uppercase', letterSpacing: 0.8 }}>Market Context</div>
-                </div>
-                <div style={{ padding: '16px 20px' }}>
-                  <div style={{ fontSize: 15, lineHeight: 1.8, color: '#000' }}>{marketContext}</div>
-                </div>
-                <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(60,60,67,0.08)', display: 'flex', gap: 16 }}>
-                  <a href="https://www.reuters.com/markets/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#007AFF', textDecoration: 'none' }}>Reuters</a>
-                  <a href="https://www.marketwatch.com/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#007AFF', textDecoration: 'none' }}>MarketWatch</a>
-                  <a href="https://asia.nikkei.com/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#007AFF', textDecoration: 'none' }}>Nikkei Asia</a>
-                </div>
-              </div>
-            )}
-
-            {personalNote && (
-              <div style={{ background: '#FFFFFF', borderRadius: 20, overflow: 'hidden', marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(60,60,67,0.08)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6E6E73', textTransform: 'uppercase', letterSpacing: 0.8 }}>Personal Note</div>
-                </div>
-                <div style={{ padding: '16px 20px' }}>
-                  <div style={{ fontSize: 15, lineHeight: 1.8, color: '#000' }}>{personalNote}</div>
-                </div>
-              </div>
-            )}
-
-            <div style={{ background: '#FFFFFF', borderRadius: 20, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 32 }}>
-              <div style={{ fontSize: 12, color: '#AEAEB2', lineHeight: 1.6 }}>
-                This commentary is for educational purposes only and does not constitute financial advice. Always conduct your own research before making investment decisions.
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  return NextResponse.json({ brief: briefContent, source: sourceLabel, id: inserted?.id || null });
 }
 `);
 
