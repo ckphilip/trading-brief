@@ -1,4 +1,28 @@
+const fs = require('fs');
 
+fs.writeFileSync('src/app/globals.css', `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #F2F2F7;
+  --surface: #FFFFFF;
+  --surface2: #F2F2F7;
+  --border: rgba(0,0,0,0.08);
+  --text: #000000;
+  --text-secondary: #6E6E73;
+  --text-tertiary: #AEAEB2;
+  --accent: #007AFF;
+  --green: #34C759;
+  --orange: #FF9500;
+  --red: #FF3B30;
+  --separator: rgba(60,60,67,0.12);
+}
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; min-height: 100vh; }
+* { -webkit-tap-highlight-color: transparent; }
+`);
+
+fs.writeFileSync('src/app/page.tsx', `
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -190,3 +214,6 @@ export default function Home() {
     </div>
   );
 }
+`);
+
+console.log('done');
