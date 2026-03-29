@@ -7,12 +7,22 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+function getWeekLabel(dateStr: string): string {
+  const date = new Date(dateStr);
+  const start = new Date(date);
+  start.setDate(date.getDate() - date.getDay());
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return start.toDateString() + ' - ' + end.toDateString();
+}
+
 export default function Home() {
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
   const [personalNote, setPersonalNote] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
 
   useEffect(() => { fetchHistory(); }, []);
 
@@ -21,7 +31,7 @@ export default function Home() {
       .from('daily_reports')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(60);
     if (data) setHistory(data);
   }
 
@@ -43,6 +53,21 @@ export default function Home() {
       setBrief('Error generating brief. Please try again.');
     }
     setBriefLoading(false);
+  }
+
+  const grouped = history.reduce((acc: Record<string, any[]>, report) => {
+    const week = getWeekLabel(report.created_at);
+    if (!acc[week]) acc[week] = [];
+    acc[week].push(report);
+    return acc;
+  }, {});
+
+  function toggleWeek(week: string) {
+    setExpandedWeeks(prev => {
+      const next = new Set(prev);
+      next.has(week) ? next.delete(week) : next.add(week);
+      return next;
+    });
   }
 
   return (
@@ -68,24 +93,39 @@ export default function Home() {
       </div>
 
       <h2 style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Brief History</h2>
-      {history.length === 0 ? (
+      {Object.keys(grouped).length === 0 ? (
         <p style={{ color: '#888', fontSize: 14 }}>No briefs generated yet.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {history.map(report => (
-            <div key={report.id} style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
-              <div
-                onClick={() => setExpanded(expanded === report.id ? null : report.id)}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', background: expanded === report.id ? '#f9f9f9' : '#fff' }}>
-                <div>
-                  <span style={{ fontWeight: 'bold', fontSize: 14 }}>{new Date(report.created_at).toDateString()}</span>
-                  <span style={{ marginLeft: 12, fontSize: 12, color: '#888' }}>{new Date(report.created_at).toLocaleTimeString()}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {Object.entries(grouped).map(([week, reports]) => (
+            <div key={week} style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+              <div onClick={() => toggleWeek(week)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', background: '#f9f9f9' }}>
+                <span style={{ fontWeight: 'bold', fontSize: 14 }}>Week of {week}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 12, color: '#888' }}>{reports.length} brief{reports.length > 1 ? 's' : ''}</span>
+                  <span style={{ fontSize: 18, color: '#888' }}>{expandedWeeks.has(week) ? '−' : '+'}</span>
                 </div>
-                <span style={{ fontSize: 18, color: '#888' }}>{expanded === report.id ? '−' : '+'}</span>
               </div>
-              {expanded === report.id && (
-                <div style={{ padding: '16px', borderTop: '1px solid #eee', background: '#fafafa', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: '#333' }}>
-                  {report.full_report}
+              {expandedWeeks.has(week) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  {reports.map(report => (
+                    <div key={report.id} style={{ borderTop: '1px solid #eee' }}>
+                      <div onClick={() => setExpanded(expanded === report.id ? null : report.id)}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', background: '#fff' }}>
+                        <div>
+                          <span style={{ fontSize: 13, fontWeight: 'bold' }}>{new Date(report.created_at).toDateString()}</span>
+                          <span style={{ marginLeft: 10, fontSize: 12, color: '#aaa' }}>{new Date(report.created_at).toLocaleTimeString()}</span>
+                        </div>
+                        <span style={{ fontSize: 16, color: '#aaa' }}>{expanded === report.id ? '−' : '+'}</span>
+                      </div>
+                      {expanded === report.id && (
+                        <div style={{ padding: '16px', borderTop: '1px solid #f0f0f0', background: '#fafafa', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-wrap', color: '#333' }}>
+                          {report.full_report}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
