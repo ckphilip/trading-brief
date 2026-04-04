@@ -121,7 +121,7 @@ export default function Home() {
           clearInterval(intervalRef.current);
         }
       } catch {}
-    }, 30000);
+    }, 3000);
   }
 
   async function handleUnlock(token: string) {
