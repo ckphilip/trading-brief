@@ -1,6 +1,6 @@
 
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -10,19 +10,28 @@ const supabase = createClient(
 
 const CORRECT_PIN = '1209';
 
-function PinGate({ onUnlock }: { onUnlock: () => void }) {
+function PinGate({ onUnlock }: { onUnlock: (token: string) => void }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit() {
-    if (pin === CORRECT_PIN) {
-      sessionStorage.setItem('tb_unlocked', '1');
-      onUnlock();
-    } else {
+  async function handleSubmit() {
+    if (pin !== CORRECT_PIN) {
       setError(true);
       setPin('');
       setTimeout(() => setError(false), 2000);
+      return;
     }
+    setLoading(true);
+    const res = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login' }),
+    });
+    const data = await res.json();
+    localStorage.setItem('tb_token', data.token);
+    onUnlock(data.token);
+    setLoading(false);
   }
 
   return (
@@ -42,9 +51,9 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
           autoFocus
         />
         {error && <div style={{ fontSize: 13, color: '#FF3B30', marginBottom: 12 }}>Incorrect PIN. Try again.</div>}
-        <button onClick={handleSubmit}
-          style={{ width: '100%', background: '#007AFF', color: '#FFFFFF', border: 'none', borderRadius: 14, padding: '16px', fontSize: 17, fontWeight: 600, cursor: 'pointer' }}>
-          Unlock
+        <button onClick={handleSubmit} disabled={loading}
+          style={{ width: '100%', background: loading ? '#AEAEB2' : '#007AFF', color: '#FFFFFF', border: 'none', borderRadius: 14, padding: '16px', fontSize: 17, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
+          {loading ? 'Unlocking...' : 'Unlock'}
         </button>
       </div>
     </div>
@@ -53,10 +62,10 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
 
 export default function Home() {
   const [unlocked, setUnlocked] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
   const [personalNote, setPersonalNote] = useState('');
-  const [publishedNote, setPublishedNote] = useState('');
   const [dataSource, setDataSource] = useState('');
   const [currentReportId, setCurrentReportId] = useState<number | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -67,13 +76,47 @@ export default function Home() {
   const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
   const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<number | null>(null);
+  const tokenRef = useRef<string>('');
 
   useEffect(() => {
-    if (sessionStorage.getItem('tb_unlocked') === '1') setUnlocked(true);
-    fetchHistory();
+    async function checkSession() {
+      const token = localStorage.getItem('tb_token');
+      if (!token) { setChecking(false); return; }
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', token }),
+      });
+      const data = await res.json();
+      if (data.valid) {
+        tokenRef.current = token;
+        setUnlocked(true);
+        fetchHistory();
+      } else {
+        localStorage.removeItem('tb_token');
+      }
+      setChecking(false);
+    }
+    checkSession();
   }, []);
 
-  if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
+  async function handleUnlock(token: string) {
+    tokenRef.current = token;
+    setUnlocked(true);
+    fetchHistory();
+  }
+
+  async function handleLogout() {
+    await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'logout' }),
+    });
+    localStorage.removeItem('tb_token');
+    setUnlocked(false);
+    setBrief('');
+    setHistory([]);
+  }
 
   async function fetchHistory() {
     const { data } = await supabase.from('daily_reports').select('*').order('created_at', { ascending: false }).limit(200);
@@ -91,10 +134,7 @@ export default function Home() {
         body: JSON.stringify({ headlines: rssData.headlines, personalNote: '', source: rssData.source }),
       });
       const data = await res.json();
-      setBrief(data.brief);
-      setDataSource(data.source || '');
-      setCurrentReportId(data.id || null);
-      fetchHistory();
+      setBrief(data.brief); setDataSource(data.source || ''); setCurrentReportId(data.id || null); fetchHistory();
     } catch { setBrief('Error generating brief. Please try again.'); }
     setBriefLoading(false);
   }
@@ -103,9 +143,7 @@ export default function Home() {
     if (!currentReportId) return;
     setPublishing(true);
     await supabase.from('daily_reports').update({ personal_note: personalNote }).eq('id', currentReportId);
-    setPublished(true);
-    setPublishing(false);
-    fetchHistory();
+    setPublished(true); setPublishing(false); fetchHistory();
   }
 
   async function deleteBrief(id: number) {
@@ -134,12 +172,26 @@ export default function Home() {
     const next = new Set(set); next.has(key) ? next.delete(key) : next.add(key); setter(next);
   };
 
+  if (checking) return (
+    <div style={{ minHeight: '100vh', background: '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ fontSize: 14, color: '#6E6E73' }}>Loading...</div>
+    </div>
+  );
+
+  if (!unlocked) return <PinGate onUnlock={handleUnlock} />;
+
   return (
     <div style={{ minHeight: '100vh', background: '#F2F2F7' }}>
       <div style={{ background: 'rgba(242,242,247,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(60,60,67,0.12)', padding: '12px 20px', position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 17, fontWeight: 700, color: '#000', letterSpacing: -0.4 }}>Trading Brief</span>
-          <span style={{ fontSize: 13, color: '#6E6E73' }}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ fontSize: 13, color: '#6E6E73' }}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            <button onClick={handleLogout}
+              style={{ background: 'none', border: '1px solid rgba(60,60,67,0.2)', borderRadius: 8, padding: '6px 12px', fontSize: 13, color: '#6E6E73', cursor: 'pointer' }}>
+              Lock
+            </button>
+          </div>
         </div>
       </div>
 
@@ -177,16 +229,12 @@ export default function Home() {
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#007AFF', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>Brief Output</div>
                 <div style={{ fontSize: 15, lineHeight: 1.8, color: '#000', whiteSpace: 'pre-wrap' }}>{brief}</div>
               </div>
-
               <div style={{ borderTop: '1px solid rgba(60,60,67,0.12)', padding: '20px' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#000', marginBottom: 4 }}>Personal Note</div>
                 <div style={{ fontSize: 13, color: '#6E6E73', marginBottom: 12 }}>Add your view after reading the brief, then publish to ngohiang.com/daily</div>
-                <textarea
-                  value={personalNote}
-                  onChange={e => setPersonalNote(e.target.value)}
+                <textarea value={personalNote} onChange={e => setPersonalNote(e.target.value)}
                   placeholder="Share your personal observation or view for today..."
-                  style={{ width: '100%', background: '#F2F2F7', border: 'none', borderRadius: 12, padding: '12px 14px', color: '#000', fontSize: 15, fontFamily: 'Inter, sans-serif', height: 100, resize: 'none', outline: 'none', lineHeight: 1.5, marginBottom: 12 }}
-                />
+                  style={{ width: '100%', background: '#F2F2F7', border: 'none', borderRadius: 12, padding: '12px 14px', color: '#000', fontSize: 15, fontFamily: 'Inter, sans-serif', height: 100, resize: 'none', outline: 'none', lineHeight: 1.5, marginBottom: 12 }} />
                 <button onClick={publishNote} disabled={publishing || published}
                   style={{ width: '100%', background: published ? '#34C759' : publishing ? '#AEAEB2' : '#1A1A1A', color: '#FFFFFF', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 600, cursor: publishing || published ? 'not-allowed' : 'pointer' }}>
                   {published ? 'Published to ngohiang.com/daily' : publishing ? 'Publishing...' : 'Publish to Daily Page'}

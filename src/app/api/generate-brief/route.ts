@@ -14,8 +14,12 @@ const supabase = createClient(
 export async function POST(request: Request) {
   const { headlines, personalNote, source } = await request.json();
   const sourceLabel = source === 'firecrawl' ? 'Firecrawl (live web scrape)' : 'RSS feeds (global)';
+  const todayDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const todayShort = new Date().toDateString();
 
   const prompt = `You are Philip's personal trading coach and morning brief generator. You think like a seasoned options income trader with decades of experience. You are strict, disciplined, and never sugarcoat reality.
+
+CRITICAL: Today's actual date is ${todayDate}. Use this exact date in your brief header. Do not use any other date.
 
 PHILIP'S TRADING CONSTITUTION
 
@@ -67,11 +71,11 @@ DATA SOURCE: ${sourceLabel}
 TODAY'S MARKET HEADLINES (tagged by region):
 ${headlines?.join('\n') || 'No headlines available'}
 
-Generate Philip's morning trading brief. Be direct, strict, coach-like. No fluff. Reference specific headlines and regions.
+Generate Philip's morning trading brief. Be direct, strict, coach-like. No fluff.
 
 Format exactly like this:
 
-MORNING BRIEF - ${new Date().toDateString()}
+MORNING BRIEF - ${todayDate}
 Data source: ${sourceLabel}
 
 MARKET CONTEXT
@@ -81,8 +85,7 @@ TRADE IDEAS
 [Suggest 2 to 3 high probability income setups. For each: Ticker, Strategy, Why now, Entry criteria, DTE, Delta target, Risk note.]
 
 RATIONALE
-[2 to 3 sentences. Coach style. Remind Philip of the most relevant rule for today.]
-`;
+[2 to 3 sentences. Coach style. Remind Philip of the most relevant rule for today.]`;
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -103,8 +106,8 @@ RATIONALE
     await resend.emails.send({
       from: 'Trading Brief <brief@ngohiang.com>',
       to: process.env.EMAIL_TO!,
-      subject: `Morning Brief - ${new Date().toDateString()}`,
-      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;"><h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">Morning Brief - ${new Date().toDateString()}</h1><pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">${briefContent}</pre><p style="color: #888; font-size: 12px; margin-top: 24px;">Educational purposes only. Not financial advice.</p></div>`,
+      subject: `Morning Brief - ${todayShort}`,
+      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;"><h1 style="font-size: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">Morning Brief - ${todayShort}</h1><pre style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; line-height: 1.8;">${briefContent}</pre><p style="color: #888; font-size: 12px; margin-top: 24px;">Educational purposes only. Not financial advice.</p></div>`,
     });
   } catch (emailError) {
     console.error('Email failed:', emailError);
