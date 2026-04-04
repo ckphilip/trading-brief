@@ -77,6 +77,7 @@ export default function Home() {
   const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<number | null>(null);
   const tokenRef = useRef<string>('');
+  const intervalRef = useRef<any>(null);
 
   useEffect(() => {
     async function checkSession() {
@@ -92,21 +93,46 @@ export default function Home() {
         tokenRef.current = token;
         setUnlocked(true);
         fetchHistory();
+        startPolling(token);
       } else {
         localStorage.removeItem('tb_token');
       }
       setChecking(false);
     }
     checkSession();
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
+
+  function startPolling(token: string) {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'verify', token }),
+        });
+        const data = await res.json();
+        if (!data.valid) {
+          localStorage.removeItem('tb_token');
+          setUnlocked(false);
+          setBrief('');
+          setHistory([]);
+          clearInterval(intervalRef.current);
+        }
+      } catch {}
+    }, 30000);
+  }
 
   async function handleUnlock(token: string) {
     tokenRef.current = token;
     setUnlocked(true);
     fetchHistory();
+    startPolling(token);
   }
 
   async function handleLogout() {
+    if (intervalRef.current) clearInterval(intervalRef.current);
     await fetch('/api/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
