@@ -1,5 +1,6 @@
 
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 import Parser from 'rss-parser';
 import { NextResponse } from 'next/server';
 
